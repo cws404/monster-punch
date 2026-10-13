@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monster Punch - Brain Brawl</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MediaPipe Hands CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;700&display=swap');
+
+        body {
+            font-family: 'Nunito', sans-serif;
+            background: linear-gradient(135deg, #1e3a8a, #4f46e5); /* Deep blue to indigo gradient */
+            color: white;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            user-select: none; /* Prevent text selection during gameplay */
+        }
+
+        h1, h2, h3, .score-text, .question-text {
+            font-family: 'Fredoka One', cursive;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        /* Container for the game area */
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Video element for webcam feed, flipped horizontally */
+        #video-element {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 0;
+            transform: scaleX(-1); /* Mirror the video */
+            opacity: 0.8; /* Slightly transparent so UI pops */
+        }
+
+        /* Canvas element for drawing hand landmarks over the video */
+        #output-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+            transform: scaleX(-1); /* Mirror canvas to match video */
+            pointer-events: none; /* Let clicks pass through if needed */
+        }
+
+        /* UI Overlay Layer */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+            pointer-events: none; /* Prevent UI from blocking monster interactions */
+        }
+
+        /* Top HUD area */
+        .hud-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            width: 100%;
+            pointer-events: auto; /* Allow clicking buttons like restart if added later */
+        }
+
+        /* Dashboard styling */
+        .dashboard-panel {
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 15px;
+            padding: 10px 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        /* Heart icons for lives */
+        .heart {
+            color: #ef4444; /* Red-500 */
+            font-size: 1.5rem;
+            transition: all 0.3s ease;
+        }
+        .heart.lost {
+            color: #4b5563; /* Gray-600 */
+            transform: scale(0.8);
+        }
+
+        /* Central Question Display */
+        #question-box {
+            background: rgba(255, 255, 255, 0.9);
+            color: #1e3a8a; /* Dark blue text */
+            padding: 20px 40px;
+            border-radius: 30px;
+            border: 4px solid #fcd34d; /* Yellow border */
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            font-size: 2rem;
+            text-align: center;
+            margin-top: 40px; /* Push down below HUD */
+            align-self: center; /* Center horizontally in flex column */
+            max-width: 80%;
+            pointer-events: auto;
+            transition: transform 0.3s ease;
+        }
+
+        /* Screens (Start, Game Over, Loading) */
+        .screen-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 23, 42, 0.9); /* Dark slate semi-transparent */
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(10px);
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+
+        /* Custom Button Style */
+        .action-btn {
+            background: linear-gradient(to bottom, #f59e0b, #d97706); /* Amber gradient */
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.5rem;
+            font-family: 'Fredoka One', cursive;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 6px 0 #b45309, 0 10px 15px rgba(0,0,0,0.4); /* 3D effect */
+            transition: all 0.1s ease;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-top: 20px;
+            pointer-events: auto;
+        }
+        .action-btn:active {
+            transform: translateY(6px);
+            box-shadow: 0 0 0 #b45309, 0 2px 5px rgba(0,0,0,0.4);
+        }
+
+        /* The monsters carrying answers */
+        .monster {
+            position: absolute;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 150px;
+            height: 180px;
+            z-index: 20; /* Above UI layer, below screens */
+            transition: transform 0.1s linear, top 0.1s linear, left 0.1s linear;
+            pointer-events: none; /* Crucial: Let JS handle collision, not CSS hover/clicks if we are using hand tracking */
+        }
+
+        /* Inner container for monster art to apply bobbing animation */
+        .monster-art {
+            width: 100%;
+            height: 100px;
+            background-color: transparent;
+            position: relative;
+            animation: bob 2s infinite ease-in-out alternate;
+        }
+
+        /* SVG styling inside monster art */
+        .monster-svg {
+            width: 100%;
+            height: 100%;
+            filter: drop-shadow(0px 5px 5px rgba(0,0,0,0.5));
+        }
+
+        /* Keyframes for bobbing motion */
+        @keyframes bob {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(-15px); }
+        }
+
+        /* The board carrying the text */
+        .answer-board {
+            background: #854d0e; /* Brown woody look */
+            color: #fef3c7; /* Light text */
+            padding: 10px 15px;
+            border-radius: 10px;
+            border: 3px solid #713f12;
+            font-family: 'Nunito', sans-serif;
+            font-weight: bold;
+            font-size: 1.2rem;
+            text-align: center;
+            margin-top: -10px; /* Overlap with monster slightly */
+            box-shadow: 0 5px 10px rgba(0,0,0,0.4);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+        }
+
+        /* Animation class applied when monster is punched */
+        .punched-anim {
+            animation: pow 0.5s forwards ease-out;
+        }
+
+        @keyframes pow {
+            0% { transform: scale(1) rotate(0deg); opacity: 1; filter: brightness(1); }
+            50% { transform: scale(1.5) rotate(15deg); opacity: 0.8; filter: brightness(2) drop-shadow(0 0 20px yellow); }
+            100% { transform: scale(0) rotate(45deg); opacity: 0; }
+        }
+
+        /* Loading Spinner */
+        .loader {
+            border: 8px solid #f3f3f3;
+            border-top: 8px solid #f59e0b;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Punch indicator cursor (virtual hand representation) */
+        #punch-indicator {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 4px solid rgba(255, 215, 0, 0.7);
+            background: radial-gradient(circle, rgba(255,215,0,0.4) 0%, rgba(255,165,0,0) 70%);
+            transform: translate(-50%, -50%); /* Center on coordinate */
+            z-index: 40; /* Above monsters */
+            pointer-events: none;
+            display: none; /* Hidden until fist is detected */
+            transition: all 0.1s ease;
+            box-shadow: 0 0 20px rgba(255, 215, 0, 0.8);
+        }
+        
+        .punch-active {
+            border-color: #ef4444 !important; /* Red border when actively punching */
+            background: radial-gradient(circle, rgba(239,68,68,0.5) 0%, rgba(239,68,68,0) 70%) !important;
+            box-shadow: 0 0 30px rgba(239, 68, 68, 0.9) !important;
+            transform: translate(-50%, -50%) scale(1.2) !important;
+        }
+
+        /* Floating text for score popups */
+        .floating-text {
+            position: absolute;
+            font-family: 'Fredoka One', cursive;
+            font-size: 2.5rem;
+            font-weight: bold;
+            text-shadow: 2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+            pointer-events: none;
+            z-index: 45;
+            animation: floatUp 1s forwards ease-out;
+        }
+        
+        .text-correct { color: #4ade80; } /* Green */
+        .text-wrong { color: #f87171; } /* Red */
+
+        @keyframes floatUp {
+            0% { transform: translateY(0) scale(1); opacity: 1; }
+            100% { transform: translateY(-50px) scale(1.2); opacity: 0; }
+        }
+
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <!-- Background Webcam Video -->
+        <video id="video-element" autoplay playsinline></video>
+        <!-- Canvas for drawing hand tracking landmarks -->
+        <canvas id="output-canvas"></canvas>
+        
+        <!-- Virtual Hand/Punch Indicator -->
+        <div id="punch-indicator"></div>
+
+        <!-- UI Overlay -->
+        <div id="ui-layer">
+            <!-- Top HUD (Heads Up Display) -->
+            <div class="hud-top">
+                <!-- Score & Level -->
+                <div class="dashboard-panel">
+                    <div class="text-xl font-bold flex flex-col items-center">
+                        <span class="text-gray-300 text-sm uppercase tracking-wider">Markah</span>
+                        <span id="score-display" class="score-text text-3xl text-yellow-400">0</span>
+                    </div>
+                </div>
+                
+                <!-- Timer -->
+                <div class="dashboard-panel">
+                    <div class="text-xl font-bold flex flex-col items-center">
+                        <span class="text-gray-300 text-sm uppercase tracking-wider">Masa</span>
+                        <span id="time-display" class="score-text text-3xl text-white">60</span>
+                    </div>
+                </div>
+
+                <!-- Lives -->
+                <div class="dashboard-panel">
+                    <div class="flex flex-col items-center">
+                         <span class="text-gray-300 text-sm uppercase tracking-wider mb-1">Nyawa</span>
+                         <div id="lives-container" class="flex gap-2">
+                             <span class="heart" id="life-1">❤️</span>
+                             <span class="heart" id="life-2">❤️</span>
+                             <span class="heart" id="life-3">❤️</span>
+                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Central Question Area (Controlled by JS to appear/disappear) -->
+            <div id="question-box" class="question-text hidden">
+                Soalan akan dipaparkan di sini...
+            </div>
+            
+            <!-- Bottom area filler for layout -->
+            <div></div>
+        </div>
+
+        <!-- Monsters Container (Injected via JS) -->
+        <div id="monsters-container"></div>
+
+        <!-- Screens -->
+        <!-- Loading Screen -->
+        <div id="loading-screen" class="screen-overlay">
+            <h1 class="text-6xl text-yellow-400 mb-2" style="text-shadow: 0 4px 0 #b45309;">Monster Punch</h1>
+            <h2 class="text-4xl text-blue-300 mb-8">Brain Brawl</h2>
+            <div class="bg-gray-800 bg-opacity-70 p-6 rounded-2xl mb-8 max-w-lg border-2 border-gray-600">
+                <p class="text-xl text-gray-300 mb-4">Permainan ini memerlukan akses kamera. Sila klik butang di bawah dan benarkan akses kamera apabila diminta oleh pelayar web (browser) anda.</p>
+                <button id="init-camera-btn" class="action-btn" style="background: linear-gradient(to bottom, #10b981, #059669); box-shadow: 0 6px 0 #047857, 0 10px 15px rgba(0,0,0,0.4);">Buka Kamera</button>
+            </div>
+            <div id="loading-spinner" class="loader hidden"></div>
+            <p id="loading-text" class="text-xl text-gray-300 max-w-md hidden">Memuatkan sistem pintar...</p>
+            <div id="camera-error-msg" class="hidden text-red-400 mt-4 max-w-md bg-red-900 bg-opacity-50 p-4 rounded-lg border border-red-500"></div>
+        </div>
+
+        <!-- Start Screen -->
+        <div id="start-screen" class="screen-overlay hidden">
+            <h1 class="text-6xl text-yellow-400 mb-2" style="text-shadow: 0 4px 0 #b45309;">Monster Punch</h1>
+            <h2 class="text-4xl text-blue-300 mb-8">Brain Brawl</h2>
+            <div class="bg-gray-800 bg-opacity-70 p-6 rounded-2xl mb-8 max-w-lg border-2 border-gray-600">
+                <h3 class="text-2xl text-white mb-4 border-b pb-2">Cara Bermain:</h3>
+                <ul class="text-left text-lg space-y-3 text-gray-200">
+                    <li>1. Soalan (Kata Hubung) akan muncul di skrin.</li>
+                    <li>2. Tiga raksasa membawa pilihan jawapan akan terbang.</li>
+                    <li>3. <strong>Genggam tangan anda (tumbuk)</strong> dan gerakkan ke arah raksasa yang membawa jawapan <strong>BETUL</strong>.</li>
+                    <li>4. Kumpul markah tertinggi sebelum masa tamat atau nyawa habis!</li>
+                </ul>
+            </div>
+            <button id="start-btn" class="action-btn">MULA BERMAIN</button>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div id="game-over-screen" class="screen-overlay hidden">
+            <h1 class="text-5xl text-red-500 mb-4" style="text-shadow: 0 4px 0 #991b1b;">PERMAINAN TAMAT!</h1>
+            <h2 id="final-message" class="text-3xl text-white mb-6">Hebat!</h2>
+            <div class="bg-indigo-900 bg-opacity-80 p-8 rounded-3xl mb-8 border-4 border-yellow-400 shadow-[0_0_30px_rgba(250,204,21,0.3)]">
+                <p class="text-2xl text-blue-200 mb-2 uppercase tracking-wide">Markah Akhir</p>
+                <p id="final-score" class="text-7xl font-bold text-yellow-400 font-['Fredoka_One'] drop-shadow-md">0</p>
+            </div>
+            <button id="restart-btn" class="action-btn">MAIN SEMULA</button>
+        </div>
+    </div>
+
+    <script>
+        // --- AUDIO SYNTHESIS ENGINE (No external URLs needed) ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        // Helper to play synthesized sounds
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            const now = audioCtx.currentTime;
+
+            if (type === 'correct') {
+                // Happy, high-pitched chime (Arpeggio)
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523.25, now); // C5
+                osc.frequency.setValueAtTime(659.25, now + 0.1); // E5
+                osc.frequency.setValueAtTime(783.99, now + 0.2); // G5
+                osc.frequency.setValueAtTime(1046.50, now + 0.3); // C6
+                
+                gainNode.gain.setValueAtTime(0, now);
+                gainNode.gain.linearRampToValueAtTime(0.3, now + 0.05);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+                
+                osc.start(now);
+                osc.stop(now + 0.5);
+            } else if (type === 'wrong') {
+                // Low, descending buzz
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.exponentialRampToValueAtTime(50, now + 0.4);
+                
+                gainNode.gain.setValueAtTime(0, now);
+                gainNode.gain.linearRampToValueAtTime(0.3, now + 0.1);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+                
+                osc.start(now);
+                osc.stop(now + 0.5);
+            } else if (type === 'punch') {
+                // Short, sharp thud
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(100, now);
+                osc.frequency.exponentialRampToValueAtTime(20, now + 0.1);
+                
+                gainNode.gain.setValueAtTime(0, now);
+                gainNode.gain.linearRampToValueAtTime(0.5, now + 0.01);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                
+                osc.start(now);
+                osc.stop(now + 0.15);
+            } else if (type === 'gameover') {
+                // Dramatic descending tone
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(300, now);
+                osc.frequency.exponentialRampToValueAtTime(50, now + 1.5);
+                
+                gainNode.gain.setValueAtTime(0, now);
+                gainNode.gain.linearRampToValueAtTime(0.4, now + 0.1);
+                gainNode.gain.linearRampToValueAtTime(0, now + 1.5);
+                
+                osc.start(now);
+                osc.stop(now + 1.5);
+            }
+        }
+
+        // --- GAME DATA: Questions & Answers (Kata Hubung) ---
+        const questionData = [
+            { question: "Ali suka bermain bola sepak ___ adiknya suka berenang.", correct: "manakala", options: ["lalu", "manakala", "kerana"] },
+            { question: "Dia tidak hadir ke sekolah ___ sakit.", correct: "kerana", options: ["kerana", "tetapi", "sambil"] },
+            { question: "Pilih baju warna merah ___ warna biru?", correct: "atau", options: ["dan", "atau", "kecuali"] },
+            { question: "Ayah membaca surat khabar ___ minum kopi.", correct: "sambil", options: ["sambil", "supaya", "walaupun"] },
+            { question: "Baju itu cantik ___ harganya sangat mahal.", correct: "tetapi", options: ["lalu", "maka", "tetapi"] },
+            { question: "Makanlah sayur-sayuran ___ badan menjadi sihat.", correct: "supaya", options: ["agar", "supaya", "kerana"] }, // Both agar/supaya acceptable, using supaya
+            { question: "Semua murid didenda ___ Ahmad yang ponteng kelas.", correct: "kecuali", options: ["kecuali", "sambil", "dan"] },
+            { question: "Pencuri itu terkejut ___ terus melarikan diri.", correct: "lalu", options: ["lalu", "walaupun", "kerana"] },
+            { question: "___ hari hujan lebat, petani itu tetap ke sawah.", correct: "Walaupun", options: ["Walaupun", "Semenjak", "Sambil"] },
+            { question: "Abu ___ Muthu ialah sahabat baik sejak kecil.", correct: "dan", options: ["atau", "dan", "maka"] }
+        ];
+
+        // --- SVG MONSTER ASSETS (Inline to avoid external images) ---
+        const monsterSVGs = [
+            // Red Cyclops
+            `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" class="monster-svg">
+                <path d="M 20 50 Q 50 10 80 50 Q 90 80 80 90 Q 50 95 20 90 Q 10 80 20 50 Z" fill="#ef4444"/>
+                <circle cx="50" cy="50" r="15" fill="white"/>
+                <circle cx="50" cy="50" r="5" fill="black"/>
+                <path d="M 30 20 Q 50 5 70 20" fill="none" stroke="#b91c1c" stroke-width="5" stroke-linecap="round"/>
+                <path d="M 40 75 Q 50 85 60 75" fill="none" stroke="#7f1d1d" stroke-width="3" stroke-linecap="round"/>
+                <!-- Arms -->
+                <path d="M 20 60 Q 5 70 10 80" fill="none" stroke="#ef4444" stroke-width="8" stroke-linecap="round"/>
+                <path d="M 80 60 Q 95 70 90 80" fill="none" stroke="#ef4444" stroke-width="8" stroke-linecap="round"/>
+            </svg>`,
+            // Green Blob
+            `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" class="monster-svg">
+                <path d="M 10 60 Q 10 20 50 20 Q 90 20 90 60 Q 90 95 70 90 Q 50 100 30 90 Q 10 95 10 60 Z" fill="#22c55e"/>
+                <circle cx="35" cy="45" r="8" fill="white"/>
+                <circle cx="65" cy="45" r="8" fill="white"/>
+                <circle cx="35" cy="45" r="3" fill="black"/>
+                <circle cx="65" cy="45" r="3" fill="black"/>
+                <!-- Mouth with teeth -->
+                <path d="M 30 70 Q 50 85 70 70" fill="none" stroke="black" stroke-width="4"/>
+                <path d="M 40 73 L 45 80 L 50 75 L 55 80 L 60 73" fill="white" stroke="none"/>
+            </svg>`,
+            // Blue Spiky
+            `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" class="monster-svg">
+                <polygon points="50,10 70,30 90,20 80,50 95,70 70,80 80,95 50,85 20,95 30,80 5,70 20,50 10,20 30,30" fill="#3b82f6"/>
+                <circle cx="40" cy="50" r="10" fill="white"/>
+                <circle cx="60" cy="50" r="10" fill="white"/>
+                <circle cx="40" cy="50" r="4" fill="black"/>
+                <circle cx="60" cy="50" r="4" fill="black"/>
+                <ellipse cx="50" cy="70" rx="15" ry="5" fill="#1e3a8a"/>
+            </svg>`
+        ];
+
+        // --- GAME STATE VARIABLES ---
+        let gameState = 'loading'; // loading, start, playing, gameover
+        let score = 0;
+        let lives = 3;
+        let timeRemaining = 60;
+        let timerInterval;
+        let currentQuestionIndex = 0;
+        let availableQuestions = [];
+        let activeMonsters = [];
+        let isFistClosed = false;
+        let fistPosition = { x: -100, y: -100 }; // Coordinates on screen
+        let lastPunchTime = 0;
+        
+        // Video/Canvas constraints relative to viewport
+        let viewportWidth = window.innerWidth;
+        let viewportHeight = window.innerHeight;
+
+        // --- DOM Elements ---
+        const videoElement = document.getElementById('video-element');
+        const canvasElement = document.getElementById('output-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const loadingScreen = document.getElementById('loading-screen');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const uiLayer = document.getElementById('ui-layer');
+        const questionBox = document.getElementById('question-box');
+        const monstersContainer = document.getElementById('monsters-container');
+        const scoreDisplay = document.getElementById('score-display');
+        const timeDisplay = document.getElementById('time-display');
+        const finalScoreDisplay = document.getElementById('final-score');
+        const startBtn = document.getElementById('start-btn');
+        const restartBtn = document.getElementById('restart-btn');
+        const punchIndicator = document.getElementById('punch-indicator');
+        
+        // New elements for manual camera init
+        const initCameraBtn = document.getElementById('init-camera-btn');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const loadingText = document.getElementById('loading-text');
+        const cameraErrorMsg = document.getElementById('camera-error-msg');
+
+        // --- MEDIAPIPE HANDS SETUP ---
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+
+        hands.setOptions({
+            maxNumHands: 1, // Only track one hand for performance and simplicity
+            modelComplexity: 1,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.5
+        });
+
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 1280,
+            height: 720
+        });
+
+        // Event listener for the explicit camera request button
+        initCameraBtn.addEventListener('click', async () => {
+            // Update UI to show loading state
+            initCameraBtn.classList.add('hidden');
+            loadingSpinner.classList.remove('hidden');
+            loadingText.classList.remove('hidden');
+            cameraErrorMsg.classList.add('hidden');
+
+            try {
+                // Explicitly request media permissions first to trigger the browser prompt
+                // This user-initiated action is crucial for iframes (like in Google Sites)
+                await navigator.mediaDevices.getUserMedia({ video: true });
+                
+                // If permission granted, start the MediaPipe camera utility
+                await camera.start();
+                
+                // Adjust canvas size to match video aspect ratio properly
+                resizeCanvas();
+                window.addEventListener('resize', resizeCanvas);
+                
+                // Hide loading, show start screen
+                loadingScreen.classList.add('hidden');
+                startScreen.classList.remove('hidden');
+                gameState = 'start';
+            } catch (err) {
+                console.error("Camera error:", err);
+                
+                // Show error message and restore the button so they can try again
+                loadingSpinner.classList.add('hidden');
+                loadingText.classList.add('hidden');
+                initCameraBtn.classList.remove('hidden');
+                initCameraBtn.textContent = "Cuba Lagi";
+                
+                cameraErrorMsg.classList.remove('hidden');
+                cameraErrorMsg.innerHTML = `<strong>Ralat Akses Kamera:</strong><br>Sistem disekat daripada mengakses kamera. Jika anda menggunakan Google Sites (Embed Code), pelayar web mungkin menyekat akses secara automatik atas sebab keselamatan.<br><br>Penyelesaian terbaik: HOSKAN fail ini di tempat lain (seperti GitHub Pages) dan gunakan 'Embed URL' di Google Sites.`;
+            }
+        });
+
+        function resizeCanvas() {
+            viewportWidth = window.innerWidth;
+            viewportHeight = window.innerHeight;
+            canvasElement.width = viewportWidth;
+            canvasElement.height = viewportHeight;
+        }
+
+        // --- HAND TRACKING PROCESSING ---
+        function onResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // Optional: Draw skeletal hand for debugging/visual feedback
+                // drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#ffffff', lineWidth: 2});
+                // drawLandmarks(canvasCtx, landmarks, {color: '#f59e0b', lineWidth: 1, radius: 2});
+
+                detectGesture(landmarks);
+            } else {
+                // Hand lost
+                isFistClosed = false;
+                punchIndicator.style.display = 'none';
+                punchIndicator.classList.remove('punch-active');
+            }
+
+            canvasCtx.restore();
+        }
+
+        function detectGesture(landmarks) {
+            // MediaPipe Landmark Indices:
+            // 0: Wrist, 4: Thumb tip, 8: Index tip, 12: Middle tip, 16: Ring tip, 20: Pinky tip
+            // 5, 9, 13, 17: MCP joints (base of fingers)
+
+            // Get center position for the "punch" area (average of MCP joints)
+            const mcpX = (landmarks[5].x + landmarks[9].x + landmarks[13].x) / 3;
+            const mcpY = (landmarks[5].y + landmarks[9].y + landmarks[13].y) / 3;
+
+            // Note: Camera is horizontally flipped visually via CSS, 
+            // but MediaPipe coordinates (0 to 1) are relative to the raw frame.
+            // X=0 is left of raw frame (which is right on screen due to flip).
+            // To map to screen pixels properly considering the CSS scaleX(-1):
+            
+            fistPosition.x = (1 - mcpX) * viewportWidth; // Invert X for CSS flip
+            fistPosition.y = mcpY * viewportHeight;
+
+            // Simple Fist Detection: Check if fingertips are lower (higher Y value) than their corresponding MCP joints
+            // Note in image coords: Y increases downwards.
+            const indexFolded = landmarks[8].y > landmarks[5].y;
+            const middleFolded = landmarks[12].y > landmarks[9].y;
+            const ringFolded = landmarks[16].y > landmarks[13].y;
+            const pinkyFolded = landmarks[20].y > landmarks[17].y;
+
+            // Thumb logic can be complex depending on angle, simpler to rely on main fingers
+            const fingersFoldedCount = [indexFolded, middleFolded, ringFolded, pinkyFolded].filter(Boolean).length;
+
+            const wasFistClosed = isFistClosed;
+            
+            // Require most fingers to be folded to count as a fist
+            if (fingersFoldedCount >= 3) {
+                isFistClosed = true;
+            } else {
+                isFistClosed = false;
+            }
+
+            // Update Indicator UI
+            punchIndicator.style.display = 'block';
+            punchIndicator.style.left = `${fistPosition.x}px`;
+            punchIndicator.style.top = `${fistPosition.y}px`;
+
+            if (isFistClosed) {
+                punchIndicator.classList.add('punch-active');
+                // Trigger a punch action only on the transition from open to closed, 
+                // or if closed and we haven't punched recently (cooldown)
+                const now = Date.now();
+                if (!wasFistClosed || (now - lastPunchTime > 1000)) { // 1 sec cooldown between holds
+                    handlePunchAction();
+                    lastPunchTime = now;
+                }
+            } else {
+                punchIndicator.classList.remove('punch-active');
+            }
+        }
+
+        // --- GAME LOGIC ---
+
+        function startGame() {
+            playSound('correct'); // Just a start sound
+            gameState = 'playing';
+            score = 0;
+            lives = 3;
+            timeRemaining = 60;
+            activeMonsters = [];
+            monstersContainer.innerHTML = '';
+            
+            // Shuffle questions
+            availableQuestions = [...questionData].sort(() => 0.5 - Math.random());
+            currentQuestionIndex = 0;
+
+            updateUI();
+            
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            questionBox.classList.remove('hidden');
+
+            // Reset Hearts
+            for (let i = 1; i <= 3; i++) {
+                document.getElementById(`life-${i}`).classList.remove('lost');
+            }
+
+            timerInterval = setInterval(() => {
+                timeRemaining--;
+                timeDisplay.textContent = timeRemaining;
+                if (timeRemaining <= 0) {
+                    endGame("Masa Tamat!");
+                }
+            }, 1000);
+
+            nextQuestion();
+            gameLoop();
+        }
+
+        function endGame(reason) {
+            gameState = 'gameover';
+            clearInterval(timerInterval);
+            playSound('gameover');
+            
+            // Clear monsters
+            monstersContainer.innerHTML = '';
+            activeMonsters = [];
+            questionBox.classList.add('hidden');
+            
+            // Show Game Over screen
+            document.getElementById('final-message').textContent = reason;
+            finalScoreDisplay.textContent = score;
+            gameOverScreen.classList.remove('hidden');
+            punchIndicator.style.display = 'none'; // Hide indicator
+        }
+
+        function updateUI() {
+            scoreDisplay.textContent = score;
+            timeDisplay.textContent = timeRemaining;
+            
+            // Update lives display
+            for (let i = 1; i <= 3; i++) {
+                const heart = document.getElementById(`life-${i}`);
+                if (i > lives) {
+                    heart.classList.add('lost');
+                } else {
+                    heart.classList.remove('lost');
+                }
+            }
+        }
+
+        function nextQuestion() {
+            if (currentQuestionIndex >= availableQuestions.length) {
+                // Re-shuffle if out of questions
+                availableQuestions = [...questionData].sort(() => 0.5 - Math.random());
+                currentQuestionIndex = 0;
+            }
+
+            const qData = availableQuestions[currentQuestionIndex];
+            
+            // Animate question box in
+            questionBox.style.transform = 'scale(0.8)';
+            questionBox.style.opacity = '0';
+            setTimeout(() => {
+                questionBox.innerHTML = qData.question.replace('___', '<span class="text-blue-500 font-bold border-b-4 border-blue-500 inline-block w-24"></span>');
+                questionBox.style.transform = 'scale(1)';
+                questionBox.style.opacity = '1';
+                spawnMonsters(qData);
+            }, 200);
+
+            currentQuestionIndex++;
+        }
+
+        function spawnMonsters(qData) {
+            // Clear existing monsters DOM
+            monstersContainer.innerHTML = '';
+            activeMonsters = [];
+
+            // Shuffle options
+            const options = [...qData.options].sort(() => 0.5 - Math.random());
+            
+            // Select 3 unique SVG art styles for the 3 options
+            const artStyles = [...monsterSVGs].sort(() => 0.5 - Math.random());
+
+            // Define spawn zones across the screen width (left, center, right)
+            const zones = [
+                { x: viewportWidth * 0.15, minX: 10, maxX: viewportWidth * 0.3 - 150 },
+                { x: viewportWidth * 0.5,  minX: viewportWidth * 0.35, maxX: viewportWidth * 0.65 - 150 },
+                { x: viewportWidth * 0.85, minX: viewportWidth * 0.7, maxX: viewportWidth * 0.9 - 150 }
+            ];
+
+            options.forEach((opt, index) => {
+                const isCorrect = (opt === qData.correct);
+                const zone = zones[index];
+                
+                // Random starting position within zone and bottom of screen
+                const startX = zone.minX + Math.random() * (zone.maxX - zone.minX);
+                const startY = viewportHeight + 100; // Start below screen
+                
+                // Target Y height (randomized so they don't all hover at same height)
+                const targetY = viewportHeight * 0.3 + Math.random() * (viewportHeight * 0.4);
+
+                const monsterEl = document.createElement('div');
+                monsterEl.className = 'monster';
+                
+                // Assign art and text
+                monsterEl.innerHTML = `
+                    <div class="monster-art">
+                        ${artStyles[index]}
+                    </div>
+                    <div class="answer-board">${opt}</div>
+                `;
+
+                // Set initial position
+                monsterEl.style.left = `${startX}px`;
+                monsterEl.style.top = `${startY}px`;
+                
+                monstersContainer.appendChild(monsterEl);
+
+                // Add to active list for logic
+                activeMonsters.push({
+                    element: monsterEl,
+                    text: opt,
+                    isCorrect: isCorrect,
+                    x: startX,
+                    y: startY,
+                    targetY: targetY,
+                    speed: 2 + Math.random() * 2, // Upward speed
+                    floatSpeed: 0.02 + Math.random() * 0.03, // Side to side float speed
+                    floatOffset: Math.random() * Math.PI * 2,
+                    baseX: startX,
+                    state: 'entering' // entering, hovering, defeated
+                });
+            });
+        }
+
+        // --- GAME LOOP & COLLISION ---
+        function gameLoop() {
+            if (gameState !== 'playing') return;
+
+            updateMonsters();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function updateMonsters() {
+            const time = Date.now();
+            
+            activeMonsters.forEach(monster => {
+                if (monster.state === 'entering') {
+                    // Move up to target height
+                    monster.y -= monster.speed;
+                    if (monster.y <= monster.targetY) {
+                        monster.y = monster.targetY;
+                        monster.state = 'hovering';
+                    }
+                } else if (monster.state === 'hovering') {
+                    // Gentle figure-8 or side-to-side floating
+                    monster.x = monster.baseX + Math.sin(time * monster.floatSpeed + monster.floatOffset) * 50;
+                    // Optional: Slight Y bobbing is already handled by CSS animation on .monster-art
+                }
+                
+                // Apply positions to DOM
+                if (monster.state !== 'defeated') {
+                     monster.element.style.left = `${monster.x}px`;
+                     monster.element.style.top = `${monster.y}px`;
+                }
+            });
+        }
+
+        function handlePunchAction() {
+            if (gameState !== 'playing') return;
+
+            // Play punch sound effect
+            playSound('punch');
+
+            // Define hit area based on hand position
+            const hitX = fistPosition.x;
+            const hitY = fistPosition.y;
+            const hitRadius = 60; // Size of the virtual punch area
+
+            let hitRegistered = false;
+
+            for (let i = 0; i < activeMonsters.length; i++) {
+                const monster = activeMonsters[i];
+                if (monster.state === 'defeated') continue;
+
+                // Simple circle-rect collision estimation
+                // Monster is roughly 150x180. Center is approx x+75, y+90
+                const mCenterX = monster.x + 75;
+                const mCenterY = monster.y + 90;
+                
+                const dx = hitX - mCenterX;
+                const dy = hitY - mCenterY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                // If distance is less than sum of punch radius + approximate monster radius
+                if (distance < hitRadius + 75) {
+                    processHit(monster, hitX, hitY);
+                    hitRegistered = true;
+                    break; // Only hit one monster at a time
+                }
+            }
+        }
+
+        function processHit(monster, x, y) {
+            monster.state = 'defeated';
+            monster.element.classList.add('punched-anim');
+            
+            // Wait for animation to finish before removing from DOM
+            setTimeout(() => {
+                if (monster.element.parentNode) {
+                    monster.element.parentNode.removeChild(monster.element);
+                }
+            }, 500);
+
+            if (monster.isCorrect) {
+                // Correct Answer
+                playSound('correct');
+                score += 10;
+                showFloatingText("BETUL! +10", x, y, 'text-correct');
+                
+                // Remove all other monsters quickly
+                activeMonsters.forEach(m => {
+                    if (m !== monster && m.state !== 'defeated') {
+                        m.state = 'defeated';
+                        m.element.style.transition = 'top 0.5s ease-in, opacity 0.5s';
+                        m.element.style.top = `${viewportHeight + 100}px`;
+                        m.element.style.opacity = '0';
+                    }
+                });
+
+                updateUI();
+                
+                // Load next question after short delay
+                setTimeout(() => {
+                    if (gameState === 'playing') {
+                        nextQuestion();
+                    }
+                }, 1000);
+
+            } else {
+                // Wrong Answer
+                playSound('wrong');
+                lives--;
+                showFloatingText("SALAH!", x, y, 'text-wrong');
+                
+                // Shake screen effect
+                document.body.style.animation = 'shake 0.5s';
+                setTimeout(() => { document.body.style.animation = ''; }, 500);
+                
+                // Define shake keyframes dynamically if not present
+                if(!document.getElementById('shake-style')) {
+                    const style = document.createElement('style');
+                    style.id = 'shake-style';
+                    style.innerHTML = `@keyframes shake { 0% {transform: translate(1px, 1px) rotate(0deg);} 10% {transform: translate(-1px, -2px) rotate(-1deg);} 20% {transform: translate(-3px, 0px) rotate(1deg);} 30% {transform: translate(3px, 2px) rotate(0deg);} 40% {transform: translate(1px, -1px) rotate(1deg);} 50% {transform: translate(-1px, 2px) rotate(-1deg);} 60% {transform: translate(-3px, 1px) rotate(0deg);} 70% {transform: translate(3px, 1px) rotate(-1deg);} 80% {transform: translate(-1px, -1px) rotate(1deg);} 90% {transform: translate(1px, 2px) rotate(0deg);} 100% {transform: translate(1px, -2px) rotate(-1deg);} }`;
+                    document.head.appendChild(style);
+                }
+
+                updateUI();
+
+                if (lives <= 0) {
+                    endGame("Kehabisan Nyawa!");
+                }
+            }
+        }
+
+        function showFloatingText(msg, x, y, className) {
+            const el = document.createElement('div');
+            el.className = `floating-text ${className}`;
+            el.textContent = msg;
+            el.style.left = `${x}px`;
+            el.style.top = `${y}px`;
+            
+            // Adjust to ensure it stays on screen roughly
+            if (x > viewportWidth - 200) el.style.left = `${viewportWidth - 200}px`;
+            
+            uiLayer.appendChild(el);
+            
+            setTimeout(() => {
+                if (el.parentNode) el.parentNode.removeChild(el);
+            }, 1000);
+        }
+
+        // --- EVENT LISTENERS ---
+        startBtn.addEventListener('click', startGame);
+        restartBtn.addEventListener('click', startGame);
+
+    </script>
+</body>
+</html>
